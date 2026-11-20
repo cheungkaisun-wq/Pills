@@ -117,7 +117,7 @@
   var viewDay, lastToday;
   var armedUndo = null, armedTimer = null;
   var armedDel = -1, armedPull = false;
-  var syncTimer = null, syncing = false, syncAgain = false, lastErr = '';
+  var syncTimer = null, syncing = false, syncAgain = false, lastErr = '', manualSync = false;
 
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
   function dayStr(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -424,8 +424,7 @@
       var nm = trim(draft[i].name);
       if (nm) { draft[i].name = nm; clean.push(draft[i]); }
     }
-    /* 只有藥物清單真係改咗，先標記為「最新清單」。
-       單純填同步設定唔會用呢部機嘅舊清單蓋過其他機。 */
+    /* 只有藥物清單真係改咗，先標記為「最新清單」 */
     if (JSON.stringify(clean) !== JSON.stringify(data.meds)) {
       data.meds = clean;
       data.medsUpdated = new Date().getTime();
@@ -445,7 +444,7 @@
     }
     armedPull = false;
     $('btnPull').innerHTML = '用雲端嘅藥物清單取代呢部機';
-    data.medsUpdated = 0;            /* 令雲端清單一定較新 */
+    data.medsUpdated = 0;
     saveLocal();
     closeSettings();
     queueSync(0);
@@ -470,7 +469,6 @@
 
   /* ---------- 同步 ---------- */
   function setSyncText(txt, err) { $('sync').innerHTML = esc(txt); $('sync').className = err ? 'err' : ''; }
-  var manualSync = false;
   $('btnSync').addEventListener('click', function () {
     if (!cfg.url) { toast('未填同步網址，請入「設定」填寫。'); return; }
     manualSync = true;
@@ -490,12 +488,7 @@
     if (!cfg.url) return;
     if (syncing) { syncAgain = true; return; }
     syncing = true;
-    setSyncText('同步中…', false);
     var xhr = new XMLHttpRequest();
-    try { xhr.open('POST', cfg.url, true); }
-    catch (e) { syncing = false; lastErr = 'G：同步網址格式唔啱，請重新複製。'; setSyncText('同步失敗 G', true); return; }
-    xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
-    xhr.timeout = 20000;
     function finish(ok, msg) {
       syncing = false;
       setSyncText(msg, !ok);
@@ -507,6 +500,10 @@
       if (syncAgain) { syncAgain = false; queueSync(500); }
     }
     function fail(short, detail) { lastErr = detail; finish(false, short); }
+    try { xhr.open('POST', cfg.url, true); }
+    catch (e) { fail('同步失敗 G', 'G：同步網址格式唔啱，請重新複製。'); return; }
+    xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
+    xhr.timeout = 20000;
     xhr.onload = function () {
       var txt = xhr.responseText || '';
       var r = null;
@@ -521,7 +518,7 @@
       data = merge(data, r.data || {});
       saveLocal();
       if (!draft) render();
-      finish(true, '已同步 ' + hhmm(new Date().getTime()));
+      finish(true, '最後同步 ' + hhmm(new Date().getTime()));
     };
     xhr.onerror = function () { fail('同步失敗 E', 'E：連唔到 Google（冇網絡，或者網址打錯）。'); };
     xhr.ontimeout = function () { fail('同步失敗 F', 'F：等太耐冇回覆，稍後會自動再試。'); };
