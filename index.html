@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="食藥">
+<title>食藥紀錄</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: rgba(0,0,0,0); }
+  body { margin: 0; padding: 14px 16px 30px; background: #1d2433; color: #fff;
+         font-family: -apple-system, "PingFang HK", "Heiti TC", sans-serif;
+         -webkit-user-select: none; user-select: none; }
+  .flex { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; -webkit-flex-wrap: wrap; flex-wrap: wrap; }
+  .spacer { -webkit-flex: 1; flex: 1; }
+  button { font-family: inherit; font-size: 20px; padding: 10px 16px; border-radius: 10px;
+           border: none; background: #3a4a6b; color: #fff; cursor: pointer; margin: 3px; }
+  #date { font-size: 26px; font-weight: bold; margin: 0 8px; text-align: center; min-width: 200px; }
+  #date.past { color: #ffcf5c; }
+  #clock { font-size: 22px; color: #9fb3d9; margin-left: 10px; }
+  #sync { font-size: 15px; color: #9fb3d9; margin-right: 8px; }
+  #sync.err { color: #ff8a80; }
+  #pastNote { display: none; background: #5a4a1a; color: #ffe8a3; padding: 8px 12px; border-radius: 10px; margin-top: 8px; font-size: 17px; }
+  h2 { font-size: 21px; margin: 16px 0 8px; color: #c9d6ef; font-weight: normal; }
+  .row { display: -webkit-flex; display: flex; -webkit-flex-wrap: wrap; flex-wrap: wrap; margin: 0 -6px; }
+  .card { -webkit-flex: 1 1 165px; flex: 1 1 165px; min-height: 175px; margin: 6px; padding: 14px 14px 64px;
+          border-radius: 16px; background: #fff; color: #111; cursor: pointer; position: relative;
+          border: 6px solid #2fb36b; }
+  .card.prn { border-color: #3d8bfd; }
+  .card .name { font-size: 28px; font-weight: bold; line-height: 1.2; word-break: break-all; }
+  .card .status { font-size: 21px; margin-top: 8px; }
+  .card .times { font-size: 17px; color: #555; margin-top: 4px; }
+  .card.partial { background: #fff6d6; }
+  .card.done { background: #3a3f4a; color: #9aa0aa; border-color: #4a505c; }
+  .card.done .times { color: #8a909a; }
+  .card.prn.used { background: #e3eeff; }
+  .undo { position: absolute; left: 8px; right: 8px; bottom: 8px; margin: 0; font-size: 18px; padding: 10px; background: #7a7f8a; }
+  .undo.arm { background: #d9534f; }
+  .empty { color: #8899bb; font-size: 18px; padding: 6px; }
+  #toast { display: none; position: absolute; left: 20px; right: 20px; top: 70px; background: #000; color: #fff;
+           padding: 16px; border-radius: 12px; font-size: 20px; text-align: center; opacity: 0.9; z-index: 9; }
+  #settings { display: none; }
+  .srow { background: #2b3550; border-radius: 12px; padding: 8px; margin-bottom: 10px; }
+  .srow > * { margin: 4px 5px; }
+  input[type=text], input[type=number], input[type=password] { font-size: 20px; padding: 8px; border-radius: 8px; border: none; }
+  .srow input[type=text] { width: 220px; }
+  .srow input[type=number] { width: 64px; }
+  select { font-size: 19px; padding: 8px; border-radius: 8px; }
+  label { font-size: 17px; }
+  .del { background: #c0392b; }
+  .ok { background: #2fb36b; }
+  .hint { color: #9fb3d9; font-size: 16px; margin-top: 12px; line-height: 1.5; }
+  .box { background: #2b3550; border-radius: 12px; padding: 12px; margin-top: 18px; }
+  .box input { width: 100%; margin: 6px 0; }
+</style>
+</head>
+<body>
+
+<div id="toast"></div>
+
+<div class="flex">
+  <button type="button" id="btnPrev">◀ 前一日</button>
+  <div id="date"></div>
+  <button type="button" id="btnNext">後一日 ▶</button>
+  <button type="button" id="btnToday">今日</button>
+  <div id="clock"></div>
+  <div class="spacer"></div>
+  <div id="sync"></div>
+  <button type="button" id="btnSet">設定</button>
+</div>
+<div id="pastNote">你而家睇緊舊日子。喺呢度撳落去會當「補記」。</div>
+
+<div id="main">
+  <h2>必食（全部食完會變暗）</h2>
+  <div id="mustRow" class="row"></div>
+  <h2>按需要食</h2>
+  <div id="prnRow" class="row"></div>
+</div>
+
+<div id="settings">
+  <h2>設定藥物</h2>
+  <div id="slist"></div>
+  <div>
+    <button type="button" id="btnAdd">＋ 新增藥物</button>
+  </div>
+  <div class="box">
+    <div style="font-size:20px">手機 / iPad 同步（可留空唔用）</div>
+    <label>同步網址</label>
+    <input type="text" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec" autocapitalize="off" autocorrect="off">
+    <label>同步密碼</label>
+    <input type="text" id="cfgKey" placeholder="同 Google 程式入面嘅密碼一樣" autocapitalize="off" autocorrect="off">
+  </div>
+  <div>
+    <button type="button" id="btnSave" class="ok">完成並儲存</button>
+    <button type="button" id="btnCancel">取消</button>
+  </div>
+  <div class="hint">
+    ‧「必食」：設定每日要食幾次，撳夠次數就會變暗。<br>
+    ‧「按需要」：唔會變暗，只會記低食咗幾次同時間。<br>
+    ‧ 過咗凌晨 12 點會自動跳去新一日，舊日子紀錄會保留（約半年）。<br>
+    ‧ 刪除藥物要連撳兩下。
+  </div>
+</div>
+
+<script>
+(function () {
+  var KEY = 'medTrackerV2';
+  var OLDKEY = 'medTrackerV1';
+  var CFGKEY = 'medTrackerCfg';
+  var KEEP_DAYS = 180;
+  var data, cfg, draft = null;
+  var viewDay, lastToday;
+  var armedUndo = null, armedTimer = null;
+  var armedDel = -1;
+  var syncTimer = null, syncing = false, syncAgain = false;
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function dayStr(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function todayStr() { return dayStr(new Date()); }
+  function parseDay(s) { var p = s.split('-'); return new Date(+p[0], +p[1] - 1, +p[2], 12, 0, 0); }
+  function shiftDay(s, n) { var d = parseDay(s); d.setDate(d.getDate() + n); return dayStr(d); }
+  function hhmm(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function newId() { return 'x' + new Date().getTime().toString(36) + Math.floor(Math.random() * 1e8).toString(36); }
+  function $(id) { return document.getElementById(id); }
+
+  /* ---------- 資料 ---------- */
+  function defaults() {
+    return {
+      meds: [
+        { id: 'm1', name: '藥物A', type: 'must', times: 1 },
+        { id: 'm2', name: '藥物B', type: 'must', times: 2 },
+        { id: 'm3', name: '止痛藥', type: 'prn', times: 1 }
+      ],
+      medsUpdated: 0,
+      logs: {}
+    };
+  }
+  function load() {
+    try {
+      var s = localStorage.getItem(KEY);
+      if (s) { var d = JSON.parse(s); if (d && d.meds) { if (!d.logs) d.logs = {}; return d; } }
+      var o = localStorage.getItem(OLDKEY);
+      if (o) {
+        var od = JSON.parse(o);
+        if (od && od.meds) {
+          var nd = { meds: od.meds, medsUpdated: 1, logs: {} };
+          if (od.day && od.log) {
+            nd.logs[od.day] = {};
+            for (var k in od.log) {
+              if (!od.log.hasOwnProperty(k)) continue;
+              nd.logs[od.day][k] = [];
+              for (var i = 0; i < od.log[k].length; i++) nd.logs[od.day][k].push({ id: newId(), t: od.log[k][i], d: 0 });
+            }
+          }
+          return nd;
+        }
+      }
+    } catch (e) {}
+    return defaults();
+  }
+  function loadCfg() {
+    try { var c = JSON.parse(localStorage.getItem(CFGKEY) || '{}'); return { url: c.url || '', key: c.key || '' }; }
+    catch (e) { return { url: '', key: '' }; }
+  }
+  function saveLocal() {
+    try { localStorage.setItem(KEY, JSON.stringify(data)); }
+    catch (e) { toast('儲存失敗：請確認 Safari 唔係用「私密瀏覽」模式。'); }
+  }
+  function changed() { saveLocal(); queueSync(800); }
+
+  /* 合併兩份資料：藥物清單取較新嗰份；紀錄逐筆合併，撤回咗嘅以撤回為準 */
+  function merge(a, b) {
+    var out = { meds: null, medsUpdated: 0, logs: {} };
+    var au = (a && a.medsUpdated) || 0, bu = (b && b.medsUpdated) || 0;
+    if (!a || !a.meds) { out.meds = b && b.meds; out.medsUpdated = bu; }
+    else if (!b || !b.meds) { out.meds = a.meds; out.medsUpdated = au; }
+    else if (au > bu) { out.meds = a.meds; out.medsUpdated = au; }
+    else { out.meds = b.meds; out.medsUpdated = bu; }
+    if (!out.meds) out.meds = [];
+    var cutoff = shiftDay(todayStr(), -KEEP_DAYS);
+    var srcs = [(a && a.logs) || {}, (b && b.logs) || {}];
+    for (var s = 0; s < 2; s++) {
+      var L = srcs[s];
+      for (var day in L) {
+        if (!L.hasOwnProperty(day) || day < cutoff) continue;
+        if (!out.logs[day]) out.logs[day] = {};
+        for (var mid in L[day]) {
+          if (!L[day].hasOwnProperty(mid)) continue;
+          var arr = out.logs[day][mid] || (out.logs[day][mid] = []);
+          var src = L[day][mid];
+          for (var i = 0; i < src.length; i++) {
+            var e = src[i], found = false;
+            for (var j = 0; j < arr.length; j++) {
+              if (arr[j].id === e.id) { if (e.d) arr[j].d = 1; found = true; break; }
+            }
+            if (!found) arr.push({ id: e.id, t: e.t, d: e.d ? 1 : 0, b: e.b ? 1 : 0 });
+          }
+          arr.sort(function (x, y) { return x.t - y.t; });
+        }
+      }
+    }
+    return out;
+  }
+
+  function entries(day, mid) {
+    var res = [];
+    var arr = data.logs[day] && data.logs[day][mid];
+    if (!arr) return res;
+    for (var i = 0; i < arr.length; i++) if (!arr[i].d) res.push(arr[i]);
+    return res;
+  }
+  function findMed(id) {
+    for (var i = 0; i < data.meds.length; i++) if (data.meds[i].id === id) return data.meds[i];
+    return null;
+  }
+
+  /* ---------- 畫面 ---------- */
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast');
+    t.innerHTML = esc(msg);
+    t.style.display = 'block';
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.style.display = 'none'; }, 2500);
+  }
+
+  var WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+  function dayLabel(s) {
+    var d = parseDay(s);
+    var t = todayStr();
+    var extra = s === t ? '（今日）' : s === shiftDay(t, -1) ? '（昨日）' : '';
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日 星期' + WEEK[d.getDay()] + extra;
+  }
+
+  function cardHtml(m) {
+    var rec = entries(viewDay, m.id);
+    var n = rec.length, cls = 'card', status;
+    if (m.type === 'prn') {
+      cls += ' prn';
+      if (n > 0) cls += ' used';
+      status = n === 0 ? '未食' : '食咗 ' + n + ' 次';
+    } else {
+      var need = m.times > 0 ? m.times : 1;
+      if (n >= need) { cls += ' done'; status = '✓ 已食晒'; }
+      else if (n > 0) { cls += ' partial'; status = '已食 ' + n + ' / ' + need; }
+      else { status = need > 1 ? '未食（每日 ' + need + ' 次）' : '未食'; }
+    }
+    var times = [];
+    for (var i = 0; i < rec.length; i++) times.push(rec[i].b ? '補記' : hhmm(rec[i].t));
+    var h = '<div class="' + cls + '" data-id="' + m.id + '">' +
+            '<div class="name">' + esc(m.name) + '</div>' +
+            '<div class="status">' + status + '</div>' +
+            '<div class="times">' + times.join('、') + '</div>';
+    if (n > 0) {
+      var armed = armedUndo === m.id;
+      h += '<button type="button" class="undo' + (armed ? ' arm' : '') + '" data-undo="' + m.id + '">' +
+           (armed ? '再撳一下確認撤回' : '撤回') + '</button>';
+    }
+    return h + '</div>';
+  }
+
+  function render() {
+    var t = todayStr();
+    $('date').innerHTML = dayLabel(viewDay);
+    $('date').className = viewDay < t ? 'past' : '';
+    $('pastNote').style.display = viewDay < t ? 'block' : 'none';
+    $('btnNext').style.visibility = viewDay < t ? 'visible' : 'hidden';
+    $('btnToday').style.visibility = viewDay < t ? 'visible' : 'hidden';
+    var must = '', prn = '';
+    for (var i = 0; i < data.meds.length; i++) {
+      var m = data.meds[i];
+      if (m.type === 'prn') prn += cardHtml(m); else must += cardHtml(m);
+    }
+    $('mustRow').innerHTML = must || '<div class="empty">未有必食藥物，撳右上「設定」加入。</div>';
+    $('prnRow').innerHTML = prn || '<div class="empty">未有按需要藥物。</div>';
+  }
+
+  function tick() {
+    var d = new Date();
+    $('clock').innerHTML = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    var t = todayStr();
+    if (t !== lastToday) {
+      if (viewDay === lastToday) viewDay = t;   /* 過咗 12 點：自動跳去新一日 */
+      lastToday = t;
+      if (!draft) render();
+    }
+  }
+
+  function disarm() {
+    armedUndo = null;
+    if (armedTimer) { clearTimeout(armedTimer); armedTimer = null; }
+  }
+
+  /* ---------- 撳卡 / 撤回 ---------- */
+  $('main').addEventListener('click', function (e) {
+    var t = e.target;
+    while (t && t !== this) {
+      var uid = t.getAttribute && t.getAttribute('data-undo');
+      if (uid) {
+        if (armedUndo === uid) {
+          disarm();
+          var rec = entries(viewDay, uid);
+          if (rec.length) { rec[rec.length - 1].d = 1; changed(); toast('已撤回'); }
+        } else {
+          disarm();
+          armedUndo = uid;
+          armedTimer = setTimeout(function () { armedUndo = null; render(); }, 4000);
+        }
+        render();
+        return;
+      }
+      var id = t.getAttribute && t.getAttribute('data-id');
+      if (id) {
+        disarm();
+        var m = findMed(id);
+        if (!m) return;
+        var n = entries(viewDay, id).length;
+        if (m.type !== 'prn' && n >= (m.times > 0 ? m.times : 1)) {
+          toast('「' + m.name + '」已經食晒。撳錯可以撳「撤回」。');
+          render();
+          return;
+        }
+        if (!data.logs[viewDay]) data.logs[viewDay] = {};
+        if (!data.logs[viewDay][id]) data.logs[viewDay][id] = [];
+        var past = viewDay < todayStr();
+        data.logs[viewDay][id].push({ id: newId(), t: new Date().getTime(), d: 0, b: past ? 1 : 0 });
+        changed();
+        render();
+        return;
+      }
+      t = t.parentNode;
+    }
+  }, false);
+
+  /* ---------- 轉日子 ---------- */
+  $('btnPrev').addEventListener('click', function () { disarm(); viewDay = shiftDay(viewDay, -1); render(); }, false);
+  $('btnNext').addEventListener('click', function () {
+    disarm();
+    var n = shiftDay(viewDay, 1);
+    if (n <= todayStr()) viewDay = n;
+    render();
+  }, false);
+  $('btnToday').addEventListener('click', function () { disarm(); viewDay = todayStr(); render(); }, false);
+
+  /* ---------- 設定 ---------- */
+  function readDraftInputs() {
+    if (!draft) return;
+    for (var i = 0; i < draft.length; i++) {
+      var n = $('n' + i);
+      if (!n) continue;
+      draft[i].name = n.value;
+      draft[i].type = $('t' + i).value;
+      var c = parseInt($('c' + i).value, 10);
+      if (isNaN(c) || c < 1) c = 1;
+      if (c > 10) c = 10;
+      draft[i].times = c;
+    }
+  }
+  function renderSettings() {
+    var h = '';
+    for (var i = 0; i < draft.length; i++) {
+      var m = draft[i];
+      h += '<div class="srow flex">' +
+        '<input type="text" id="n' + i + '" value="' + esc(m.name) + '" placeholder="藥名">' +
+        '<select id="t' + i + '">' +
+          '<option value="must"' + (m.type !== 'prn' ? ' selected' : '') + '>必食</option>' +
+          '<option value="prn"' + (m.type === 'prn' ? ' selected' : '') + '>按需要</option>' +
+        '</select>' +
+        '<label>每日次數</label>' +
+        '<input type="number" id="c' + i + '" min="1" max="10" value="' + (m.times || 1) + '">' +
+        '<button type="button" data-act="up" data-i="' + i + '">↑</button>' +
+        '<button type="button" data-act="down" data-i="' + i + '">↓</button>' +
+        '<button type="button" class="del" data-act="del" data-i="' + i + '">' +
+          (armedDel === i ? '再撳確認刪除' : '刪除') + '</button>' +
+        '</div>';
+    }
+    $('slist').innerHTML = h || '<div class="empty">未有藥物，撳「新增藥物」。</div>';
+  }
+  function openSettings() {
+    disarm();
+    draft = JSON.parse(JSON.stringify(data.meds));
+    armedDel = -1;
+    renderSettings();
+    $('cfgUrl').value = cfg.url;
+    $('cfgKey').value = cfg.key;
+    $('main').style.display = 'none';
+    $('btnSet').style.display = 'none';
+    $('settings').style.display = 'block';
+  }
+  function closeSettings() {
+    draft = null;
+    $('settings').style.display = 'none';
+    $('main').style.display = 'block';
+    $('btnSet').style.display = '';
+    render();
+  }
+  $('btnSet').addEventListener('click', openSettings, false);
+  $('btnCancel').addEventListener('click', closeSettings, false);
+  $('btnAdd').addEventListener('click', function () {
+    readDraftInputs();
+    armedDel = -1;
+    draft.push({ id: newId(), name: '', type: 'must', times: 1 });
+    renderSettings();
+    var last = $('n' + (draft.length - 1));
+    if (last) last.focus();
+  }, false);
+  $('btnSave').addEventListener('click', function () {
+    readDraftInputs();
+    var clean = [];
+    for (var i = 0; i < draft.length; i++) {
+      var nm = draft[i].name.replace(/^\s+|\s+$/g, '');
+      if (nm) { draft[i].name = nm; clean.push(draft[i]); }
+    }
+    data.meds = clean;
+    data.medsUpdated = new Date().getTime();
+    cfg.url = $('cfgUrl').value.replace(/^\s+|\s+$/g, '');
+    cfg.key = $('cfgKey').value.replace(/^\s+|\s+$/g, '');
+    try { localStorage.setItem(CFGKEY, JSON.stringify(cfg)); } catch (e) {}
+    changed();
+    closeSettings();
+    if (cfg.url) queueSync(100); else setSyncText('', false);
+  }, false);
+  $('slist').addEventListener('click', function (e) {
+    var t = e.target;
+    var act = t.getAttribute && t.getAttribute('data-act');
+    if (!act) return;
+    readDraftInputs();
+    var i = parseInt(t.getAttribute('data-i'), 10), tmp;
+    if (act === 'del') {
+      if (armedDel === i) { draft.splice(i, 1); armedDel = -1; }
+      else armedDel = i;
+    } else {
+      armedDel = -1;
+      if (act === 'up' && i > 0) { tmp = draft[i - 1]; draft[i - 1] = draft[i]; draft[i] = tmp; }
+      else if (act === 'down' && i < draft.length - 1) { tmp = draft[i + 1]; draft[i + 1] = draft[i]; draft[i] = tmp; }
+    }
+    renderSettings();
+  }, false);
+
+  /* ---------- 同步 ---------- */
+  function setSyncText(txt, err) { $('sync').innerHTML = esc(txt); $('sync').className = err ? 'err' : ''; }
+  function queueSync(ms) {
+    if (!cfg.url) return;
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(doSync, ms);
+  }
+  function doSync() {
+    syncTimer = null;
+    if (!cfg.url) return;
+    if (syncing) { syncAgain = true; return; }
+    syncing = true;
+    setSyncText('同步中…', false);
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', cfg.url, true);
+    xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
+    xhr.timeout = 20000;
+    function finish(ok, msg) {
+      syncing = false;
+      setSyncText(msg, !ok);
+      if (syncAgain) { syncAgain = false; queueSync(500); }
+    }
+    xhr.onload = function () {
+      var r = null;
+      try { r = JSON.parse(xhr.responseText); } catch (e) {}
+      if (!r) return finish(false, '同步失敗（網址？）');
+      if (r.error) return finish(false, '同步失敗（密碼錯）');
+      data = merge(data, r.data || {});
+      saveLocal();
+      if (!draft) render();
+      finish(true, '已同步 ' + hhmm(new Date().getTime()));
+    };
+    xhr.onerror = function () { finish(false, '同步失敗（無網絡？）'); };
+    xhr.ontimeout = function () { finish(false, '同步失敗（超時）'); };
+    xhr.send(JSON.stringify({ key: cfg.key, data: data }));
+  }
+
+  /* ---------- 啟動 ---------- */
+  data = load();
+  cfg = loadCfg();
+  lastToday = todayStr();
+  viewDay = lastToday;
+  saveLocal();
+  render();
+  tick();
+  setInterval(tick, 5000);
+  setInterval(function () { queueSync(0); }, 60000);
+  if (cfg.url) queueSync(0); else setSyncText('', false);
+  function wake() { tick(); queueSync(0); }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) wake(); }, false);
+  window.addEventListener('pageshow', wake, false);
+  window.addEventListener('focus', wake, false);
+})();
+</script>
+</body>
+</html>
