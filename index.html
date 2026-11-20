@@ -19,8 +19,10 @@
   #date { font-size: 26px; font-weight: bold; margin: 0 8px; text-align: center; min-width: 200px; }
   #date.past { color: #ffcf5c; }
   #clock { font-size: 22px; color: #9fb3d9; margin-left: 10px; }
-  #sync { font-size: 15px; color: #9fb3d9; margin-right: 8px; }
-  #sync.err { color: #ff8a80; }
+  #sync { font-size: 16px; color: #9fb3d9; margin: 0 6px; cursor: pointer; }
+  #sync.err { color: #fff; background: #7a2b2b; padding: 8px 10px; border-radius: 8px; }
+  #btnSync { background: #2f7fb3; }
+  #btnSync.busy { opacity: 0.5; }
   #pastNote { display: none; background: #5a4a1a; color: #ffe8a3; padding: 8px 12px; border-radius: 10px; margin-top: 8px; font-size: 17px; }
   h2 { font-size: 21px; margin: 16px 0 8px; color: #c9d6ef; font-weight: normal; }
   .row { display: -webkit-flex; display: flex; -webkit-flex-wrap: wrap; flex-wrap: wrap; margin: 0 -6px; }
@@ -39,11 +41,11 @@
   .undo.arm { background: #d9534f; }
   .empty { color: #8899bb; font-size: 18px; padding: 6px; }
   #toast { display: none; position: absolute; left: 20px; right: 20px; top: 70px; background: #000; color: #fff;
-           padding: 16px; border-radius: 12px; font-size: 20px; text-align: center; opacity: 0.9; z-index: 9; }
+           padding: 16px; border-radius: 12px; font-size: 20px; text-align: center; opacity: 0.92; z-index: 9; line-height: 1.4; }
   #settings { display: none; }
   .srow { background: #2b3550; border-radius: 12px; padding: 8px; margin-bottom: 10px; }
   .srow > * { margin: 4px 5px; }
-  input[type=text], input[type=number], input[type=password] { font-size: 20px; padding: 8px; border-radius: 8px; border: none; }
+  input[type=text], input[type=number] { font-size: 20px; padding: 8px; border-radius: 8px; border: none; }
   .srow input[type=text] { width: 220px; }
   .srow input[type=number] { width: 64px; }
   select { font-size: 19px; padding: 8px; border-radius: 8px; }
@@ -66,7 +68,8 @@
   <button type="button" id="btnToday">今日</button>
   <div id="clock"></div>
   <div class="spacer"></div>
-  <div id="sync"></div>
+  <div id="sync">同步：未設定</div>
+  <button type="button" id="btnSync">🔄 立即同步</button>
   <button type="button" id="btnSet">設定</button>
 </div>
 <div id="pastNote">你而家睇緊舊日子。喺呢度撳落去會當「補記」。</div>
@@ -90,6 +93,7 @@
     <input type="text" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec" autocapitalize="off" autocorrect="off">
     <label>同步密碼</label>
     <input type="text" id="cfgKey" placeholder="同 Google 程式入面嘅密碼一樣" autocapitalize="off" autocorrect="off">
+    <button type="button" id="btnPull">用雲端嘅藥物清單取代呢部機</button>
   </div>
   <div>
     <button type="button" id="btnSave" class="ok">完成並儲存</button>
@@ -112,8 +116,8 @@
   var data, cfg, draft = null;
   var viewDay, lastToday;
   var armedUndo = null, armedTimer = null;
-  var armedDel = -1;
-  var syncTimer = null, syncing = false, syncAgain = false;
+  var armedDel = -1, armedPull = false;
+  var syncTimer = null, syncing = false, syncAgain = false, lastErr = '';
 
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
   function dayStr(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -124,6 +128,7 @@
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function newId() { return 'x' + new Date().getTime().toString(36) + Math.floor(Math.random() * 1e8).toString(36); }
   function $(id) { return document.getElementById(id); }
+  function trim(s) { return String(s).replace(/^\s+|\s+$/g, ''); }
 
   /* ---------- 資料 ---------- */
   function defaults() {
@@ -170,7 +175,7 @@
   }
   function changed() { saveLocal(); queueSync(800); }
 
-  /* 合併兩份資料：藥物清單取較新嗰份；紀錄逐筆合併，撤回咗嘅以撤回為準 */
+  /* 合併：藥物清單取較新嗰份；紀錄逐筆合併，撤回咗嘅以撤回為準 */
   function merge(a, b) {
     var out = { meds: null, medsUpdated: 0, logs: {} };
     var au = (a && a.medsUpdated) || 0, bu = (b && b.medsUpdated) || 0;
@@ -218,12 +223,12 @@
 
   /* ---------- 畫面 ---------- */
   var toastTimer = null;
-  function toast(msg) {
+  function toast(msg, ms) {
     var t = $('toast');
     t.innerHTML = esc(msg);
     t.style.display = 'block';
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.style.display = 'none'; }, 2500);
+    toastTimer = setTimeout(function () { t.style.display = 'none'; }, ms || 2500);
   }
 
   var WEEK = ['日', '一', '二', '三', '四', '五', '六'];
@@ -282,7 +287,7 @@
     $('clock').innerHTML = pad(d.getHours()) + ':' + pad(d.getMinutes());
     var t = todayStr();
     if (t !== lastToday) {
-      if (viewDay === lastToday) viewDay = t;   /* 過咗 12 點：自動跳去新一日 */
+      if (viewDay === lastToday) viewDay = t;
       lastToday = t;
       if (!draft) render();
     }
@@ -381,7 +386,8 @@
   function openSettings() {
     disarm();
     draft = JSON.parse(JSON.stringify(data.meds));
-    armedDel = -1;
+    armedDel = -1; armedPull = false;
+    $('btnPull').innerHTML = '用雲端嘅藥物清單取代呢部機';
     renderSettings();
     $('cfgUrl').value = cfg.url;
     $('cfgKey').value = cfg.key;
@@ -395,6 +401,11 @@
     $('main').style.display = 'block';
     $('btnSet').style.display = '';
     render();
+  }
+  function saveCfgFromInputs() {
+    cfg.url = trim($('cfgUrl').value);
+    cfg.key = trim($('cfgKey').value);
+    try { localStorage.setItem(CFGKEY, JSON.stringify(cfg)); } catch (e) {}
   }
   $('btnSet').addEventListener('click', openSettings, false);
   $('btnCancel').addEventListener('click', closeSettings, false);
@@ -410,17 +421,35 @@
     readDraftInputs();
     var clean = [];
     for (var i = 0; i < draft.length; i++) {
-      var nm = draft[i].name.replace(/^\s+|\s+$/g, '');
+      var nm = trim(draft[i].name);
       if (nm) { draft[i].name = nm; clean.push(draft[i]); }
     }
-    data.meds = clean;
-    data.medsUpdated = new Date().getTime();
-    cfg.url = $('cfgUrl').value.replace(/^\s+|\s+$/g, '');
-    cfg.key = $('cfgKey').value.replace(/^\s+|\s+$/g, '');
-    try { localStorage.setItem(CFGKEY, JSON.stringify(cfg)); } catch (e) {}
+    /* 只有藥物清單真係改咗，先標記為「最新清單」。
+       單純填同步設定唔會用呢部機嘅舊清單蓋過其他機。 */
+    if (JSON.stringify(clean) !== JSON.stringify(data.meds)) {
+      data.meds = clean;
+      data.medsUpdated = new Date().getTime();
+    }
+    saveCfgFromInputs();
     changed();
     closeSettings();
-    if (cfg.url) queueSync(100); else setSyncText('', false);
+    if (cfg.url) queueSync(100); else setSyncText('同步：未設定', false);
+  }, false);
+  $('btnPull').addEventListener('click', function () {
+    saveCfgFromInputs();
+    if (!cfg.url) { toast('請先填同步網址同密碼。'); return; }
+    if (!armedPull) {
+      armedPull = true;
+      $('btnPull').innerHTML = '再撳一下確認（呢部機嘅藥物清單會被取代）';
+      return;
+    }
+    armedPull = false;
+    $('btnPull').innerHTML = '用雲端嘅藥物清單取代呢部機';
+    data.medsUpdated = 0;            /* 令雲端清單一定較新 */
+    saveLocal();
+    closeSettings();
+    queueSync(0);
+    toast('正在由雲端取回藥物清單…');
   }, false);
   $('slist').addEventListener('click', function (e) {
     var t = e.target;
@@ -441,6 +470,16 @@
 
   /* ---------- 同步 ---------- */
   function setSyncText(txt, err) { $('sync').innerHTML = esc(txt); $('sync').className = err ? 'err' : ''; }
+  var manualSync = false;
+  $('btnSync').addEventListener('click', function () {
+    if (!cfg.url) { toast('未填同步網址，請入「設定」填寫。'); return; }
+    manualSync = true;
+    $('btnSync').className = 'busy';
+    queueSync(0);
+  }, false);
+  $('sync').addEventListener('click', function () {
+    if (lastErr) toast(lastErr, 8000);
+  }, false);
   function queueSync(ms) {
     if (!cfg.url) return;
     if (syncTimer) clearTimeout(syncTimer);
@@ -453,26 +492,39 @@
     syncing = true;
     setSyncText('同步中…', false);
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', cfg.url, true);
+    try { xhr.open('POST', cfg.url, true); }
+    catch (e) { syncing = false; lastErr = 'G：同步網址格式唔啱，請重新複製。'; setSyncText('同步失敗 G', true); return; }
     xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
     xhr.timeout = 20000;
     function finish(ok, msg) {
       syncing = false;
       setSyncText(msg, !ok);
+      if (manualSync) {
+        manualSync = false;
+        $('btnSync').className = '';
+        toast(ok ? '✓ 同步完成' : (lastErr || msg), ok ? 1500 : 8000);
+      }
       if (syncAgain) { syncAgain = false; queueSync(500); }
     }
+    function fail(short, detail) { lastErr = detail; finish(false, short); }
     xhr.onload = function () {
+      var txt = xhr.responseText || '';
       var r = null;
-      try { r = JSON.parse(xhr.responseText); } catch (e) {}
-      if (!r) return finish(false, '同步失敗（網址？）');
-      if (r.error) return finish(false, '同步失敗（密碼錯）');
+      try { r = JSON.parse(txt); } catch (e) {}
+      if (!r) {
+        if (/^\s*</.test(txt)) return fail('同步失敗 A', 'A：Google 回覆咗網頁而唔係資料。通常係「誰可以存取」唔係「所有人」，或者網址唔係 /exec 結尾。（狀態 ' + xhr.status + '）');
+        return fail('同步失敗 B', 'B：回覆無法讀取（狀態 ' + xhr.status + '）：' + txt.substring(0, 80));
+      }
+      if (r.error === 'key') return fail('同步失敗 C', 'C：密碼唔啱。注意：喺 Google 改完密碼，要「管理部署作業 → 新版本 → 部署」先生效。');
+      if (r.error) return fail('同步失敗 D', 'D：Google 程式出錯：' + r.error);
+      lastErr = '';
       data = merge(data, r.data || {});
       saveLocal();
       if (!draft) render();
       finish(true, '已同步 ' + hhmm(new Date().getTime()));
     };
-    xhr.onerror = function () { finish(false, '同步失敗（無網絡？）'); };
-    xhr.ontimeout = function () { finish(false, '同步失敗（超時）'); };
+    xhr.onerror = function () { fail('同步失敗 E', 'E：連唔到 Google（冇網絡，或者網址打錯）。'); };
+    xhr.ontimeout = function () { fail('同步失敗 F', 'F：等太耐冇回覆，稍後會自動再試。'); };
     xhr.send(JSON.stringify({ key: cfg.key, data: data }));
   }
 
@@ -485,8 +537,8 @@
   render();
   tick();
   setInterval(tick, 5000);
-  setInterval(function () { queueSync(0); }, 60000);
-  if (cfg.url) queueSync(0); else setSyncText('', false);
+  setInterval(function () { if (!document.hidden && !draft) queueSync(0); }, 15000);
+  if (cfg.url) queueSync(0); else setSyncText('同步：未設定', false);
   function wake() { tick(); queueSync(0); }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) wake(); }, false);
   window.addEventListener('pageshow', wake, false);
